@@ -183,9 +183,13 @@ void runClient(char *ipAddr)
   write(sockfd, RSALine, 4096);
 
   // What is send back is the encrypted AES session key
-  if(read(sockfd, recvline, MESSAGE_SIZE) != 16)
+  int readLen = read(sockfd, recvline, MESSAGE_SIZE);
+
+  char *decryptedKey;
+  if(RSA_private_decrypt(readLen, (unsigned char*)recvline, (unsigned char*)decryptedKey, privateKey, RSA_PKCS1_PADDING) == -1)
   {
-      fprintf(stderr, "%s\n", "Problem with Key transfer");
+    fprintf(stderr, "%s\n", "Error decrypting session key");
+    exit(1);
   }
   printf("%s\n", recvline);
 
