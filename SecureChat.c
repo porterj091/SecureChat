@@ -13,12 +13,13 @@
 
 #define SERVER_PORT 6993
 #define MESSAGE_SIZE 1024
+#define AES_KeySize 16  // In bytes
 static int listen_fd, comm_fd, sockfd;
 
 void Usage();
 void runServer();
 void runClient(char *);
-void generateKeys(char *, char *);
+RSA* generateKeys(char *, char *);
 
 void sig_handler(int signo)
 {
@@ -73,7 +74,9 @@ int main(int argc, char *argv[])
 
 void runServer()
 {
+  AES_KEY sessionKey;
   char message[MESSAGE_SIZE];
+  char decryptedMessage[MESSAGE_SIZE];
   unsigned char rsaMessage[4096];
   char sendMessage[MESSAGE_SIZE];
 
@@ -103,36 +106,64 @@ void runServer()
 
   comm_fd = accept(listen_fd, (struct sockaddr*) NULL, NULL);
 
+  printf("\n%s\n", "Client trying to Connect\nEstablishing a secure session");
+
   // Read the RSA public key from the client
   read(comm_fd, rsaMessage, 4096);
 
   RSA *publicKey = NULL;
-  BIO *pub = BIO_new_mem_buf(rsaMessage, -1);
+  BIO *pub = BIO_new_mem_buf(rsaMessage, (int)strlen(rsaMessage));
   PEM_read_bio_RSAPublicKey(pub, &publicKey, NULL, NULL);
+
   if(publicKey == NULL)
   {
     fprintf(stderr, "%s\n", "Problem reading public key from client");
     close(comm_fd);
     exit(1);
   }
-  printf("%s\n", rsaMessage);
 
-  char* c = "1234567890123456";
+  memset(&rsaMessage, 0, sizeof(rsaMessage));
+
+  // Grab random bytes to use as session key
+  unsigned char randomBytes[16];
+  FILE *fp = fopen("/dev/urandom", "r");
+  fread(&randomBytes, 1, AES_KeySize, fp);
+  fclose(fp);
+
+  // Server will only be decrypting the message
+  if(AES_set_decrypt_key(randomBytes, 128, &sessionKey) != 0)
+  {
+    fprintf(stderr, "%s\n", "Session Key could not be generated");
+    exit(1);
+  }
+
+  // Generate a Session key from /dev/urandom
   int encryptedLen;
-  if((encryptedLen = RSA_public_encrypt(strlen(c), (unsigned char*)c, (unsigned char*)sendMessage, publicKey, RSA_PKCS1_PADDING)) == -1)
+  if((encryptedLen = RSA_public_encrypt(AES_KeySize, (unsigned char*)randomBytes, (unsigned char*)rsaMessage, publicKey, RSA_PKCS1_PADDING)) == -1)
   {
     fprintf(stderr, "%s\n", "Error encrypting session key");
     close(comm_fd);
     exit(1);
   }
-  write(comm_fd, sendMessage, strlen(sendMessage));
+  write(comm_fd, rsaMessage, encryptedLen);
+
+  RSA_free(publicKey);
+  free(pub);
+  printf("%s\n\n", "Secure Connection Established");
 
   while(1)
   {
     memset(&message, 0, sizeof(message));
+    memset(&decryptedMessage, 0, sizeof(decryptedMessage));
     read(comm_fd, message, MESSAGE_SIZE);
 
-    printf("Message Received: %s\n", message);
+    // Decrypt the message in 16 byte chunks
+    for(int i = 0; i < MESSAGE_SIZE; i += 16)
+    {
+      AES_ecb_encrypt(message + i, decryptedMessage + i, &sessionKey, AES_DECRYPT);
+    }
+
+    printf("Message Received: %s", decryptedMessage);
   }
 
   close(comm_fd);
@@ -140,7 +171,9 @@ void runServer()
 
 void runClient(char *ipAddr)
 {
+  AES_KEY sessionKey;
   unsigned char sendline[MESSAGE_SIZE];
+  unsigned char encryptedMessage[MESSAGE_SIZE];
   unsigned char recvline[MESSAGE_SIZE];
   unsigned char RSALine[4096];
   struct sockaddr_in serverAddr;
@@ -169,11 +202,12 @@ void runClient(char *ipAddr)
     perror("CONNECTION");
     exit(1);
   }
-  printf("%s\n", "Establishing a secure connection!");
+  printf("\n%s\n", "Establishing a secure connection!");
 
   char publicKey[4096];
   char privateKey[4096];
-  generateKeys(publicKey, privateKey);
+  RSA *keypair = NULL;
+  keypair = generateKeys(publicKey, privateKey);
 
   memset(&RSALine, 0, sizeof(RSALine));
   memset(&recvline, 0, sizeof(recvline));
@@ -185,23 +219,38 @@ void runClient(char *ipAddr)
   // What is send back is the encrypted AES session key
   int readLen = read(sockfd, recvline, MESSAGE_SIZE);
 
-  char *decryptedKey;
-  if(RSA_private_decrypt(readLen, (unsigned char*)recvline, (unsigned char*)decryptedKey, privateKey, RSA_PKCS1_PADDING) == -1)
+  unsigned char decryptedKey[4096];
+  if(RSA_private_decrypt(readLen, (unsigned char*)recvline, (unsigned char*)decryptedKey, keypair, RSA_PKCS1_PADDING) == -1)
   {
     fprintf(stderr, "%s\n", "Error decrypting session key");
     exit(1);
   }
-  printf("%s\n", recvline);
+
+  if(AES_set_encrypt_key(decryptedKey, 128, &sessionKey) != 0)
+  {
+    fprintf(stderr, "%s\n", "Session Key could not be generated");
+    exit(1);
+  }
+
+  RSA_free(keypair);
+
+  printf("%s\n\n", "Secure Connection Established!");
 
 
+  // Now allow user to send messages encrypted to server
   while(1)
   {
     memset(&sendline, 0, sizeof(sendline));
-    memset(&recvline, 0, sizeof(recvline));
+    memset(&encryptedMessage, 0, sizeof(encryptedMessage));
     printf("%s", "Enter Message: ");
-    fgets((char*)sendline, MESSAGE_SIZE-1, stdin);
-    write(sockfd, sendline, strlen((char*)sendline));
-    printf("%s\n", recvline);
+    fgets((char*)sendline, MESSAGE_SIZE, stdin);
+
+    // Encrypt the message in 16 byte chunks
+    for(int i = 0; i < MESSAGE_SIZE; i += 16)
+    {
+      AES_ecb_encrypt(sendline + i, encryptedMessage + i, &sessionKey, AES_ENCRYPT);
+    }
+    write(sockfd, encryptedMessage, MESSAGE_SIZE);
   }
 
   close(sockfd);
@@ -213,7 +262,7 @@ void Usage()
   printf("%s\n", "./SecureChat {-l | -c TARGET-IP}");
 }
 
-void generateKeys(char *publicDest, char *privateDest)
+RSA* generateKeys(char *publicDest, char *privateDest)
 {
   RSA *keypair = NULL;
   keypair = RSA_new();
@@ -248,6 +297,8 @@ void generateKeys(char *publicDest, char *privateDest)
   memcpy(publicDest, pub_key, pub_len);
   memcpy(privateDest, pri_key, pri_len);
 
-  return;
+  free(pri);
+  free(pub);
 
+  return keypair;
 }
