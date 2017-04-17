@@ -1,11 +1,16 @@
 #include <sys/types.h>
 #include <sys/socket.h>
+#include <sys/wait.h>
+#include <sys/stat.h>
 #include <netdb.h>
 #include <stdio.h>
 #include <string.h>
 #include <stdint.h>
+#include <stdlib.h>
+#include <ctype.h>
 #include <unistd.h>
 #include <signal.h>
+#include <time.h>
 #include <arpa/inet.h>
 #include <openssl/aes.h>
 #include <openssl/rsa.h>
@@ -14,18 +19,24 @@
 #define SERVER_PORT 6993
 #define MESSAGE_SIZE 1024
 #define AES_KeySize 16  // In bytes
+
 static int listen_fd, comm_fd, sockfd;
 
 void Usage();
 void runServer();
 void runClient(char *);
 RSA* generateKeys(char *, char *);
+void readCode(const char *filename);
+void mutateCode();
+void writeCode(unsigned char *filename);
+int writeinstruction(unsigned reg, int offset, int space);
+int readinstruction(unsigned reg, int offset);
 
 void sig_handler(int signo)
 {
   if (signo == SIGINT)
   {
-    printf("\n%s\n", "Shutting Down!");
+    printf("\n%s\n", "Disconnecting!");
     close(listen_fd);
     close(comm_fd);
     close(sockfd);
@@ -78,7 +89,6 @@ void runServer()
   char message[MESSAGE_SIZE];
   char decryptedMessage[MESSAGE_SIZE];
   unsigned char rsaMessage[4096];
-  char sendMessage[MESSAGE_SIZE];
 
   struct sockaddr_in serverAddr;
 
@@ -155,7 +165,12 @@ void runServer()
   {
     memset(&message, 0, sizeof(message));
     memset(&decryptedMessage, 0, sizeof(decryptedMessage));
-    read(comm_fd, message, MESSAGE_SIZE);
+    if(read(comm_fd, message, MESSAGE_SIZE) <= 0)
+    {
+      printf("%s\n", "Client Disconnected!");
+      close(comm_fd);
+      exit(1);
+    }
 
     // Decrypt the message in 16 byte chunks
     for(int i = 0; i < MESSAGE_SIZE; i += 16)
@@ -243,7 +258,11 @@ void runClient(char *ipAddr)
     memset(&sendline, 0, sizeof(sendline));
     memset(&encryptedMessage, 0, sizeof(encryptedMessage));
     printf("%s", "Enter Message: ");
-    fgets((char*)sendline, MESSAGE_SIZE, stdin);
+    if(fgets((char*)sendline, MESSAGE_SIZE, stdin) == NULL)
+    {
+      close(sockfd);
+      exit(1);
+    }
 
     // Encrypt the message in 16 byte chunks
     for(int i = 0; i < MESSAGE_SIZE; i += 16)
