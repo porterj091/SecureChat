@@ -117,7 +117,7 @@ void runServer()
   read(comm_fd, rsaMessage, 4096);
 
   RSA *publicKey = NULL;
-  BIO *pub = BIO_new_mem_buf(rsaMessage, (int)strlen(rsaMessage));
+  BIO *pub = BIO_new_mem_buf(rsaMessage, (int)strlen((const char*)rsaMessage));
   PEM_read_bio_RSAPublicKey(pub, &publicKey, NULL, NULL);
 
   if(publicKey == NULL)
@@ -170,7 +170,7 @@ void runServer()
     // Decrypt the message in 16 byte chunks
     for(int i = 0; i < MESSAGE_SIZE; i += 16)
     {
-      AES_ecb_encrypt(message + i, decryptedMessage + i, &sessionKey, AES_DECRYPT);
+      AES_ecb_encrypt((const unsigned char*)message + i, (unsigned char*)decryptedMessage + i, &sessionKey, AES_DECRYPT);
     }
 
     printf("Message Received: %s", decryptedMessage);
