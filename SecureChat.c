@@ -158,8 +158,8 @@ void runServer()
 
   while(1)
   {
-    memset(&message, 0, sizeof(message));
-    memset(&decryptedMessage, 0, sizeof(decryptedMessage));
+    memset(&message, 0, MESSAGE_SIZE);
+    memset(&decryptedMessage, 0, MESSAGE_SIZE);
     if(read(comm_fd, message, MESSAGE_SIZE) <= 0)
     {
       printf("%s\n", "Client Disconnected!");
@@ -184,7 +184,7 @@ void runClient(char *ipAddr)
   AES_KEY sessionKey;
   unsigned char sendline[MESSAGE_SIZE];
   unsigned char encryptedMessage[MESSAGE_SIZE];
-  unsigned char recvline[MESSAGE_SIZE];
+  unsigned char recvline[4096];
   unsigned char RSALine[4096];
   struct sockaddr_in serverAddr;
 
@@ -227,7 +227,7 @@ void runClient(char *ipAddr)
   write(sockfd, RSALine, 4096);
 
   // What is send back is the encrypted AES session key
-  int readLen = read(sockfd, recvline, MESSAGE_SIZE);
+  int readLen = read(sockfd, recvline, 4096);
 
   unsigned char decryptedKey[4096];
   if(RSA_private_decrypt(readLen, (unsigned char*)recvline, (unsigned char*)decryptedKey, keypair, RSA_PKCS1_PADDING) == -1)
