@@ -26,11 +26,6 @@ void Usage();
 void runServer();
 void runClient(char *);
 RSA* generateKeys(char *, char *);
-void readCode(const char *filename);
-void mutateCode();
-void writeCode(unsigned char *filename);
-int writeinstruction(unsigned reg, int offset, int space);
-int readinstruction(unsigned reg, int offset);
 
 void sig_handler(int signo)
 {
