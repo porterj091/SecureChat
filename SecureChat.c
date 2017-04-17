@@ -98,7 +98,7 @@ void runServer()
   memset(&serverAddr, 0, sizeof(serverAddr));
 
   serverAddr.sin_family = AF_INET;
-  serverAddr.sin_addr.s_addr = htons(INADDR_ANY);
+  serverAddr.sin_addr.s_addr = htonl(INADDR_ANY);
   serverAddr.sin_port = htons(SERVER_PORT);
 
   if(bind(listen_fd, (const struct sockaddr*) &serverAddr, sizeof(serverAddr)) != 0)
@@ -160,12 +160,15 @@ void runServer()
   {
     memset(&message, 0, MESSAGE_SIZE);
     memset(&decryptedMessage, 0, MESSAGE_SIZE);
-    if(read(comm_fd, message, MESSAGE_SIZE) <= 0)
+    int readLen;
+    if((readLen = read(comm_fd, message, MESSAGE_SIZE)) <= 0)
     {
       printf("%s\n", "Client Disconnected!");
       close(comm_fd);
       exit(1);
     }
+
+    printf("\nNum of bytes read: %d\n", readLen);
 
     // Decrypt the message in 16 byte chunks
     for(int i = 0; i < MESSAGE_SIZE; i += 16)
@@ -173,7 +176,10 @@ void runServer()
       AES_ecb_encrypt((const unsigned char*)message + i, (unsigned char*)decryptedMessage + i, &sessionKey, AES_DECRYPT);
     }
 
-    printf("Message Received: %s", decryptedMessage);
+    if(decryptedMessage[MESSAGE_SIZE-3] == 0x01 && decryptedMessage[MESSAGE_SIZE-2] == 0x02 && decryptedMessage[MESSAGE_SIZE-1] == 0x03)
+    {
+      printf("Message Received: %s", decryptedMessage);
+    }
   }
 
   close(comm_fd);
@@ -200,7 +206,7 @@ void runClient(char *ipAddr)
   serverAddr.sin_family = AF_INET;
   serverAddr.sin_port = htons(SERVER_PORT);
 
-  if(inet_pton(AF_INET, ipAddr, &(serverAddr.sin_addr)) != 1)
+  if(inet_pton(AF_INET, ipAddr, &serverAddr.sin_addr) != 1)
   {
     fprintf(stderr, "%s\n", "ERROR COULD NOT FIND IP");
     fprintf(stderr, "%s\n", "IP Address must be in this format ddd.ddd.ddd.ddd");
@@ -250,21 +256,27 @@ void runClient(char *ipAddr)
   // Now allow user to send messages encrypted to server
   while(1)
   {
-    memset(&sendline, 0, sizeof(sendline));
-    memset(&encryptedMessage, 0, sizeof(encryptedMessage));
+    memset(&sendline, 0, MESSAGE_SIZE);
+    memset(&encryptedMessage, 0, MESSAGE_SIZE);
     printf("%s", "Enter Message: ");
-    if(fgets((char*)sendline, MESSAGE_SIZE, stdin) == NULL)
+    if(fgets((char*)sendline, MESSAGE_SIZE-3, stdin) == NULL)
     {
       close(sockfd);
       exit(1);
     }
-
-    // Encrypt the message in 16 byte chunks
-    for(int i = 0; i < MESSAGE_SIZE; i += 16)
+    else
     {
-      AES_ecb_encrypt(sendline + i, encryptedMessage + i, &sessionKey, AES_ENCRYPT);
+      printf("%s\n", "Fgets is sending data!");
+      sendline[MESSAGE_SIZE-3] = 0x01;
+      sendline[MESSAGE_SIZE-2] = 0x02;
+      sendline[MESSAGE_SIZE-1] = 0x03;
+      // Encrypt the message in 16 byte chunks
+      for(int i = 0; i < MESSAGE_SIZE; i += 16)
+      {
+        AES_ecb_encrypt(sendline + i, encryptedMessage + i, &sessionKey, AES_ENCRYPT);
+      }
+      //write(sockfd, encryptedMessage, MESSAGE_SIZE);
     }
-    write(sockfd, encryptedMessage, MESSAGE_SIZE);
   }
 
   close(sockfd);
@@ -302,8 +314,8 @@ RSA* generateKeys(char *publicDest, char *privateDest)
   size_t pri_len = BIO_pending(pri);
   size_t pub_len = BIO_pending(pub);
 
-  char *pri_key = malloc(pri_len + 1);
-  char *pub_key = malloc(pub_len + 1);
+  char *pri_key = (char *)malloc(pri_len + 1);
+  char *pub_key = (char *)malloc(pub_len + 1);
 
   BIO_read(pri, pri_key, pri_len);
   BIO_read(pub, pub_key, pub_len);
