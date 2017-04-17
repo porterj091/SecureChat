@@ -168,8 +168,6 @@ void runServer()
       exit(1);
     }
 
-    printf("\nNum of bytes read: %d\n", readLen);
-
     // Decrypt the message in 16 byte chunks
     for(int i = 0; i < MESSAGE_SIZE; i += 16)
     {
@@ -266,7 +264,7 @@ void runClient(char *ipAddr)
     }
     else
     {
-      printf("%s\n", "Fgets is sending data!");
+      // Add some safety checks since I was having problem with sockets over a network
       sendline[MESSAGE_SIZE-3] = 0x01;
       sendline[MESSAGE_SIZE-2] = 0x02;
       sendline[MESSAGE_SIZE-1] = 0x03;
@@ -275,7 +273,7 @@ void runClient(char *ipAddr)
       {
         AES_ecb_encrypt(sendline + i, encryptedMessage + i, &sessionKey, AES_ENCRYPT);
       }
-      //write(sockfd, encryptedMessage, MESSAGE_SIZE);
+      write(sockfd, encryptedMessage, MESSAGE_SIZE);
     }
   }
 
